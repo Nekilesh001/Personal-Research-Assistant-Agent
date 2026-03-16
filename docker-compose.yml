@@ -1,0 +1,51 @@
+# ═══════════════════════════════════════════════════
+# Personal Research Assistant Agent — Docker Compose
+# ═══════════════════════════════════════════════════
+# Start everything: docker-compose up --build
+
+version: "3.9"
+
+services:
+  # ─── Backend (FastAPI/Python) ───
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=production
+      - CHROMA_PERSIST_DIR=/app/chroma_db
+      - SQLITE_DB_PATH=/app/data/research_agent.db
+    volumes:
+      - chroma_data:/app/chroma_db
+      - sqlite_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─── Frontend (React/Vite) ───
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+    driver: local
+  sqlite_data:
+    driver: local

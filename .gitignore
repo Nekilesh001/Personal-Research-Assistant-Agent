@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+node_modules/
+dist/
+chroma_db/
+*.db
+.DS_Store
+*.log
+.idea/
+.vscode/

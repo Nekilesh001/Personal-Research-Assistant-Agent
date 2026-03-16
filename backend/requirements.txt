@@ -1,0 +1,52 @@
+# -------------------------------------------------------
+# Personal Research Assistant Agent - Backend Dependencies
+# All versions pinned and compatible as of 2025
+# -------------------------------------------------------
+
+# --- Core Framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-dotenv==1.0.1
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# --- LangChain Core ---
+langchain==0.3.14
+langchain-core==0.3.29
+langchain-community==0.3.14
+langgraph==0.2.62
+
+# --- LLM Providers ---
+langchain-google-genai==2.0.8
+langchain-openai==0.3.0
+langchain-ollama==0.2.3
+
+# --- Embeddings & Retrieval ---
+sentence-transformers==3.3.1
+chromadb==0.5.23
+
+# --- Re-ranking ---
+# CrossEncoder is included in sentence-transformers
+
+# --- Paper Fetching ---
+arxiv==2.1.3
+httpx==0.28.1
+beautifulsoup4==4.12.3
+
+# --- Token Counting ---
+tiktoken==0.8.0
+
+# --- Markdown & Text Processing ---
+lxml==5.3.0
+
+# --- Database ---
+aiosqlite==0.20.0
+
+# --- SSE Streaming ---
+sse-starlette==2.2.1
+
+# --- Logging ---
+structlog==24.4.0
+
+# --- Wikipedia ---
+wikipedia==1.4.0
