@@ -1,0 +1,17 @@
+# Backend build — exclude venv, cache, secrets, and DB data
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+!.env.example
+chroma_db/
+data/
+*.db
+*.log
+.git/
+.gitignore
+*.md

@@ -1,16 +1,15 @@
 # ═══════════════════════════════════════════════════
-# Personal Research Assistant Agent — Docker Compose
+# Personal Research Assistant Agent — Deployment
 # ═══════════════════════════════════════════════════
-# Start everything: docker-compose up --build
-
-version: "3.9"
+# This version pulls pre-built images from Docker Hub.
+# Usage:
+#   1. cp .env.example .env  # fill in GROQ_API_KEY
+#   2. docker-compose up -d
 
 services:
-  # ─── Backend (FastAPI/Python) ───
+  # ─── Backend (FastAPI/Python) ───────────────────
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: nekilesh/research-assistant-backend:latest
     ports:
       - "8000:8000"
     env_file:
@@ -24,21 +23,17 @@ services:
       - sqlite_data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 45s
 
-  # ─── Frontend (React/Vite) ───
+  # ─── Frontend (React/Vite → nginx) ─────────────
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.frontend
+    image: nekilesh/research-assistant-frontend:latest
     ports:
       - "3000:3000"
-    environment:
-      - VITE_API_URL=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy

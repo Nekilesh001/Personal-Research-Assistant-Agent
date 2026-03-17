@@ -1,0 +1,9 @@
+# Node modules and build artifacts
+node_modules/
+dist/
+.cache/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
