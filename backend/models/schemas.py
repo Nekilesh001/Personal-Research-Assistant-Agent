@@ -23,6 +23,7 @@ class Source(str, Enum):
     arxiv = "arxiv"
     semantic_scholar = "semantic_scholar"
     both = "both"
+    uploaded = "uploaded"
 
 
 class FilterConfig(BaseModel):

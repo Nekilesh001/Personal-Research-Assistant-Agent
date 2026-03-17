@@ -188,6 +188,21 @@ async def invoke_with_retry(
                 logger.info("llm_retry_waiting", delay_seconds=delay)
                 await asyncio.sleep(delay)
 
+    # If all retries failed due to rate limiting, try Ollama as fallback
+    if last_error and "429" in str(last_error):
+        logger.warning("llm_rate_limited_trying_ollama", error=str(last_error)[:100])
+        print("\n[FALLBACK] Groq rate limited — switching to local Ollama...\n")
+        try:
+            ollama_llm = _build_llm("ollama", temperature=0.3, streaming=False)
+            if ollama_llm is not None:
+                response = await ollama_llm.ainvoke(prompt)
+                content = getattr(response, "content", str(response))
+                logger.info("ollama_fallback_success", response_length=len(content))
+                return content
+        except Exception as ollama_exc:
+            logger.warning("ollama_fallback_failed", error=str(ollama_exc)[:200])
+            print(f"\n[FALLBACK FAILED] Ollama error: {ollama_exc}\n")
+
     raise RuntimeError(
         f"LLM call failed after {max_retries} attempts. "
         f"Last error ({type(last_error).__name__}): {str(last_error)}"

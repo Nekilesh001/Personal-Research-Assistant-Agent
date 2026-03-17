@@ -230,6 +230,7 @@ def mmr_search(
     query: str,
     n_results: int = 10,
     diversity_factor: float = 0.3,
+    where_filter: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Retrieve chunks using Maximal Marginal Relevance for diversity.
@@ -241,13 +242,14 @@ def mmr_search(
         query: The search query text.
         n_results: Desired number of diverse results.
         diversity_factor: 0.0 = pure relevance, 1.0 = pure diversity.
+        where_filter: Optional ChromaDB metadata filter.
 
     Returns:
         List of diverse result dicts.
     """
     # Fetch extra candidates for MMR selection
     candidate_count = min(n_results * 3, 30)
-    candidates = search_similar(query, n_results=candidate_count)
+    candidates = search_similar(query, n_results=candidate_count, where_filter=where_filter)
 
     if not candidates:
         return []

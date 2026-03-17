@@ -11,6 +11,7 @@ Provides tools for:
 
 import os
 import re
+import time
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -55,10 +56,12 @@ def _get_cross_encoder() -> CrossEncoder:
 @tool
 def fetch_arxiv_papers(
     query: str,
-    max_results: int = 5,
+    max_results: int = 10,
     year_from: Optional[int] = None,
     year_to: Optional[int] = None,
     sort_by: str = "relevance",
+    keywords: Optional[List[str]] = None,
+    domain: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch academic papers from arXiv.
 
@@ -68,27 +71,72 @@ def fetch_arxiv_papers(
         year_from: Filter papers published on or after this year.
         year_to: Filter papers published on or before this year.
         sort_by: Sort order — 'relevance', 'most_recent', or 'most_cited'.
+        keywords: Optional list of keywords to add to the query.
+        domain: Optional research domain name to map to an arXiv category.
 
     Returns:
         List of paper dictionaries with title, authors, abstract, url, year, source.
     """
-    logger.info("arxiv_fetch_start", query=query, max_results=max_results)
+    # Sanitize query for arXiv
+    query = query.strip()
+    prefixes_to_remove = [
+        "papers related to ",
+        "papers about ",
+        "research on ",
+        "articles about ",
+        "find papers on ",
+        "search for ",
+    ]
+    for prefix in prefixes_to_remove:
+        if query.lower().startswith(prefix):
+            query = query[len(prefix):]
+            break
 
-    # Map sort options to arxiv library's sort criteria
+    # Remove standalone dashes that arXiv treats as exclusion operators
+    query = re.sub(r'\s+-\s+', ' ', query)
+    query = re.sub(r'^-\s+', '', query)
+
+    # Build enhanced query with keywords and domain
+    enhanced_query = query
+
+    if keywords:
+        enhanced_query = f"{query} {' '.join(keywords)}"
+
+    domain_map = {
+        'Computer Science': 'cs',
+        'Artificial Intelligence': 'cs.AI',
+        'Machine Learning': 'cs.LG',
+        'Natural Language Processing': 'cs.CL',
+        'Computer Vision': 'cs.CV',
+        'Physics': 'physics',
+        'Mathematics': 'math',
+        'Biology': 'q-bio',
+        'Medicine': 'q-bio.GN',
+        'Economics': 'econ',
+        'Electrical Engineering': 'eess',
+    }
+    if domain:
+        cat = domain_map.get(domain, '')
+        if cat:
+            enhanced_query = f"{enhanced_query} cat:{cat}"
+
+    logger.info("arxiv_fetch_start", query=enhanced_query[:80], max_results=max_results)
+
     sort_map = {
         "relevance": arxiv.SortCriterion.Relevance,
         "most_recent": arxiv.SortCriterion.SubmittedDate,
-        "most_cited": arxiv.SortCriterion.Relevance,  # arXiv doesn't support citation sort
+        "most_cited": arxiv.SortCriterion.Relevance,
     }
     sort_criterion = sort_map.get(sort_by, arxiv.SortCriterion.Relevance)
 
     papers: List[Dict[str, Any]] = []
 
     try:
+        time.sleep(0.5)  # prevent arXiv rate limiting
         client = arxiv.Client()
         search = arxiv.Search(
-            query=query,
-            max_results=max_results * 2,  # fetch extra for date filtering
+            query=enhanced_query,
+            max_results=max_results * 2,
             sort_by=sort_criterion,
             sort_order=arxiv.SortOrder.Descending,
         )
@@ -96,18 +144,17 @@ def fetch_arxiv_papers(
         for result in client.results(search):
             pub_year = result.published.year if result.published else None
 
-            # Apply year filters
-            if year_from and pub_year and pub_year < year_from:
+            if year_from and pub_year and pub_year < int(year_from):
                 continue
-            if year_to and pub_year and pub_year > year_to:
+            if year_to and pub_year and pub_year > int(year_to):
                 continue
 
             paper = {
                 "title": result.title.strip(),
-                "authors": [str(a) for a in result.authors[:5]],
-                "abstract": result.summary.strip(),
+                "authors": [a.name for a in result.authors[:5]],
+                "abstract": result.summary.strip()[:800],
                 "url": result.entry_id,
-                "year": pub_year,
+                "year": str(pub_year) if pub_year else None,
                 "source": "arxiv",
                 "citation_count": None,
                 "doi": result.doi,
@@ -117,11 +164,11 @@ def fetch_arxiv_papers(
             if len(papers) >= max_results:
                 break
 
-        logger.info("arxiv_fetch_success", papers_found=len(papers))
+        logger.info("arxiv_fetch_success", papers_found=len(papers), query=enhanced_query[:60])
 
     except Exception as exc:
         logger.error("arxiv_fetch_failed", error=str(exc))
-        return [{"error": f"arXiv fetch failed: {str(exc)}"}]
+        return []
 
     return papers
 
@@ -236,7 +283,7 @@ def fetch_semantic_scholar_papers(
             break
 
     logger.warning("semantic_scholar_all_retries_failed", error=str(last_error))
-    return [{"error": f"Semantic Scholar fetch failed after {MAX_RETRIES} retries: {str(last_error)}"}]
+    return []
 
 
 @tool
@@ -245,6 +292,7 @@ def search_vector_store(
     n_results: int = 10,
     use_mmr: bool = True,
     rerank: bool = True,
+    source_filter: str = "",
 ) -> List[Dict[str, Any]]:
     """Search the vector store for relevant paper chunks.
 
@@ -255,17 +303,21 @@ def search_vector_store(
         n_results: Number of results to return.
         use_mmr: Whether to use MMR for diversity (vs plain similarity).
         rerank: Whether to re-rank results with CrossEncoder.
+        source_filter: If set, only return chunks from this source (e.g. 'uploaded').
 
     Returns:
         List of relevant text chunks with metadata and scores.
     """
     logger.info("vector_search_start", query=query[:60], n_results=n_results)
 
+    # Build metadata filter if source_filter is specified
+    where_filter = {"source": source_filter} if source_filter else None
+
     try:
         if use_mmr:
-            results = mmr_search(query, n_results=n_results * 2 if rerank else n_results)
+            results = mmr_search(query, n_results=n_results * 2 if rerank else n_results, where_filter=where_filter)
         else:
-            results = search_similar(query, n_results=n_results * 2 if rerank else n_results)
+            results = search_similar(query, n_results=n_results * 2 if rerank else n_results, where_filter=where_filter)
 
         if not results:
             logger.info("vector_search_no_results")

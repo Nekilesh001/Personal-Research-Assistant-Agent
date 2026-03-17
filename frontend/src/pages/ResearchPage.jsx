@@ -21,7 +21,7 @@ export default function ResearchPage() {
     keywords: [],
     year_from: null,
     year_to: null,
-    sort: 'relevance',
+    sort_by: 'relevance',
     source: 'arxiv',
   });
 
@@ -37,22 +37,32 @@ export default function ResearchPage() {
   const [toast, setToast] = useState(null);
   const abortControllerRef = useRef(null);
 
-  // New state for two-step search flow
+  // Two-step search flow state
   const [searchResults, setSearchResults] = useState([]);
   const [selectedPapers, setSelectedPapers] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [paperCount, setPaperCount] = useState(10);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // On mount: auto-populate query from location state (from HomePage or HistoryPage)
+  // Follow-up questions state
+  const [followups, setFollowups] = useState([]);
+
+  // Guard to prevent double auto-search
+  const autoSearchDone = useRef(false);
+
+  // On mount: auto-populate query from location state AND auto-trigger search
   useEffect(() => {
-    if (location.state?.query) {
+    if (location.state?.query && !autoSearchDone.current) {
+      autoSearchDone.current = true;
       setQuery(location.state.query);
+      // Auto-trigger search after state is set
+      setTimeout(() => {
+        searchPapers(null, location.state.query, 10);
+      }, 300);
     }
     if (location.state?.source) {
       setFilters(prev => ({ ...prev, source: location.state.source }));
     }
-    // If redirected from history, load that report
     if (location.state?.queryId) {
       loadPastQuery(location.state.queryId);
     }
@@ -63,7 +73,7 @@ export default function ResearchPage() {
     try {
       const res = await fetch(`${API}/api/history`);
       if (res.ok) setHistory(await res.json());
-    } catch {}
+    } catch { }
   };
 
   const showToast = (message, type = 'info') => {
@@ -72,17 +82,20 @@ export default function ResearchPage() {
   };
 
   const handleUploadComplete = (results, useUploadedOnly = true) => {
-    const count = results.filter(r => r.status === 'success').length;
+    const successResults = results.filter(r => r.status === 'success');
+    const count = successResults.length;
     if (count > 0) {
       showToast(`${count} document(s) embedded. Starting analysis...`, 'success');
-      
       const newSource = useUploadedOnly ? 'uploaded' : 'both';
       setFilters(prev => ({ ...prev, source: newSource }));
-      
-      const promptQuery = query.trim() || 'Please summarize the key findings, methodology, and conclusions of the uploaded papers.';
+
+      // Build a specific query using the uploaded paper titles/filenames
+      const paperNames = successResults
+        .map(r => r.title || r.filename || 'uploaded document')
+        .join(', ');
+      const promptQuery = query.trim()
+        || `Please provide a detailed analysis of the uploaded paper(s): ${paperNames}. Summarize the key findings, methodology, results, and conclusions.`;
       if (!query.trim()) setQuery(promptQuery);
-      
-      // For uploaded papers, skip search and go directly to report generation
       generateReport(null, promptQuery, { ...filters, source: newSource });
     }
   };
@@ -92,6 +105,7 @@ export default function ResearchPage() {
     setSearchResults([]);
     setSelectedPapers([]);
     setHasSearched(false);
+    setFollowups([]);
     try {
       const res = await fetch(`${API}/api/history/${queryId}`);
       if (res.ok) {
@@ -121,6 +135,7 @@ export default function ResearchPage() {
           setCurrentPapers([]);
           setIsComplete(false);
           setLogs([]);
+          setFollowups([]);
         }
       }
     } catch {
@@ -131,24 +146,27 @@ export default function ResearchPage() {
   // ────────────────────────────────────────────────
   // Step 1: Search papers (zero tokens)
   // ────────────────────────────────────────────────
-  const searchPapers = async (e, countOverride) => {
+  const searchPapers = async (e, queryOverride = null, countOverride = null) => {
     if (e) e.preventDefault();
+    const activeQuery = queryOverride || query;
     const activeCount = countOverride || paperCount;
-    if (!query.trim() || isSearching) return;
+    if (!activeQuery.trim() || isSearching) return;
 
     setIsSearching(true);
     setSearchResults([]);
     setSelectedPapers([]);
     setCurrentReport(null);
+    setCurrentQueryId(null);
     setCurrentPapers([]);
     setHasSearched(false);
+    setFollowups([]);
 
     try {
       const res = await fetch(`${API}/api/search-papers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query,
+          query: activeQuery,
           filters: { ...filters, paper_count: activeCount },
           mode: 'expert',
         }),
@@ -202,6 +220,7 @@ export default function ResearchPage() {
     setIsComplete(false);
     setSearchResults([]);
     setHasSearched(false);
+    setFollowups([]);
 
     if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
@@ -234,7 +253,6 @@ export default function ResearchPage() {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.substring(6));
-            console.log("SSE chunk received:", data.type);
             if (data.type === 'metadata') {
               const qid = data.query_id || data.id || data.content;
               if (qid) setCurrentQueryId(qid);
@@ -252,18 +270,22 @@ export default function ResearchPage() {
                 setCurrentPapers(data.content);
               }
             }
+            else if (data.type === 'followups') {
+              if (Array.isArray(data.content)) {
+                setFollowups(data.content);
+              }
+            }
             else if (data.type === 'thought' ||
-                     data.type === 'action'  ||
-                     data.type === 'observation') {
+              data.type === 'action' ||
+              data.type === 'observation') {
               setLogs(prev => [...prev,
-                `[${data.type.toUpperCase()}] ${data.content}`
+              `[${data.type.toUpperCase()}] ${data.content}`
               ]);
             }
             else if (data.type === 'log') {
               setLogs(prev => [...prev, data.content]);
             }
             else if (data.type === 'error') {
-              console.error("Agent returned error:", data.content);
               showToast(`Agent Error: ${data.content}`, 'error');
               setLogs(prev => [...prev, `[ERROR] ${data.content}`]);
             }
@@ -272,7 +294,7 @@ export default function ResearchPage() {
               setSelectedPapers([]);
               fetchHistory();
             }
-          } catch {}
+          } catch { }
         }
       }
     } catch (err) {
@@ -326,8 +348,8 @@ export default function ResearchPage() {
                 {isSearching ? (
                   <>
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                     Searching...
                   </>
@@ -356,7 +378,7 @@ export default function ResearchPage() {
                 paperCount={paperCount}
                 onPaperCountChange={(n) => {
                   setPaperCount(n);
-                  searchPapers(null, n);
+                  searchPapers(null, null, n);
                 }}
                 isLoading={isSearching}
               />
@@ -373,6 +395,29 @@ export default function ResearchPage() {
               />
             )}
 
+            {/* Follow-up questions */}
+            {followups.length > 0 && (
+              <div className="mt-4 p-4 bg-slate-800 border border-slate-700 rounded-xl">
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">
+                  Explore Further
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {followups.map((q, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setQuery(q);
+                        searchPapers(null, q, paperCount);
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-full border border-slate-600 text-slate-300 hover:border-indigo-500 hover:text-indigo-300 transition-colors text-left"
+                    >
+                      → {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Empty state */}
             {!hasSearched && !isSearching && !currentReport && (
               <div className="flex flex-col items-center justify-center h-64 text-slate-500">
@@ -386,13 +431,10 @@ export default function ResearchPage() {
           </div>
         </div>
 
-        {/* Right Sidebar */}
+        {/* Right Sidebar — Agent Logs only (ChatBot is now floating) */}
         <aside className="lg:col-span-3 flex flex-col gap-4 h-[calc(100vh-7rem)] sticky top-20">
-          <div className="flex-shrink-0">
+          <div className="flex-1">
             <AgentLogStream logs={logs} isLoading={isStreaming} />
-          </div>
-          <div className="flex-1 min-h-[200px]">
-            <ChatBot queryId={currentQueryId} />
           </div>
         </aside>
       </main>
@@ -405,6 +447,9 @@ export default function ResearchPage() {
         onSelectAll={selectAllPapers}
         onClearAll={clearAllPapers}
       />
+
+      {/* Floating chat bubble */}
+      <ChatBot queryId={currentQueryId} />
     </div>
   );
 }

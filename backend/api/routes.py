@@ -28,6 +28,7 @@ from utils.db import (
     get_report_by_id,
     get_query_by_id,
     delete_query,
+    get_chat_messages,
 )
 from utils.logger import get_logger
 from utils.pdf_generator import generate_pdf_bytes
@@ -83,7 +84,8 @@ async def search_papers(request: QueryRequest):
 
     query = request.query
     filters = request.filters
-    paper_count = getattr(filters, 'paper_count', 10)
+    paper_count = int(getattr(filters, 'paper_count', 10))
+
     # Convert enum to plain string for comparison
     source = str(getattr(filters, 'source', 'both'))
     if hasattr(filters.source, 'value'):
@@ -91,12 +93,16 @@ async def search_papers(request: QueryRequest):
 
     sort_by_str = filters.sort_by.value if hasattr(filters.sort_by, 'value') else str(filters.sort_by)
 
+    # Extract filter values for enhanced search
+    keywords = list(getattr(filters, 'keywords', []) or [])
+    domain = str(getattr(filters, 'domain', '') or '')
+
     all_papers = []
     seen_titles = set()
 
-    logger.info("search_papers_start", query=query[:60], source=source, paper_count=paper_count)
+    logger.info("search_papers_start", query=query[:60], source=source, paper_count=paper_count, domain=domain)
 
-    # Fetch from arXiv (sync function — call .func to bypass @tool wrapper)
+    # Fetch from arXiv
     if source in ('arxiv', 'both'):
         try:
             arxiv_raw = await asyncio.to_thread(
@@ -106,21 +112,22 @@ async def search_papers(request: QueryRequest):
                 filters.year_from,
                 filters.year_to,
                 sort_by_str,
+                keywords if keywords else None,
+                domain if domain else None,
             )
             logger.info("arxiv_raw_result",
                         count=len(arxiv_raw) if isinstance(arxiv_raw, list) else 0,
                         sample=str(arxiv_raw[:1]) if isinstance(arxiv_raw, list) and arxiv_raw else "empty")
-            if isinstance(arxiv_raw, list):
-                for p in arxiv_raw:
-                    if isinstance(p, dict) and 'error' not in p:
-                        title = p.get('title', '')
-                        if title and title not in seen_titles:
-                            seen_titles.add(title)
-                            all_papers.append(p)
+            for p in (arxiv_raw or []):
+                if isinstance(p, dict) and 'error' not in p:
+                    title = p.get('title', '')
+                    if title and title not in seen_titles:
+                        seen_titles.add(title)
+                        all_papers.append(p)
         except Exception as exc:
             logger.warning("search_arxiv_failed", error=str(exc))
 
-    # Fetch from Semantic Scholar (sync function — call .func)
+    # Fetch from Semantic Scholar
     if source in ('semantic_scholar', 'both'):
         try:
             ss_raw = await asyncio.to_thread(
@@ -134,15 +141,40 @@ async def search_papers(request: QueryRequest):
             logger.info("ss_raw_result",
                         count=len(ss_raw) if isinstance(ss_raw, list) else 0,
                         sample=str(ss_raw[:1]) if isinstance(ss_raw, list) and ss_raw else "empty")
-            if isinstance(ss_raw, list):
-                for p in ss_raw:
-                    if isinstance(p, dict) and 'error' not in p:
-                        title = p.get('title', '')
-                        if title and title not in seen_titles:
-                            seen_titles.add(title)
-                            all_papers.append(p)
+            for p in (ss_raw or []):
+                if isinstance(p, dict) and 'error' not in p:
+                    title = p.get('title', '')
+                    if title and title not in seen_titles:
+                        seen_titles.add(title)
+                        all_papers.append(p)
         except Exception as exc:
             logger.warning("search_ss_failed", error=str(exc))
+
+    # Auto-fallback to Semantic Scholar if arXiv returned nothing
+    if len(all_papers) == 0 and source not in ('semantic_scholar',):
+        logger.warning("arxiv_zero_results_trying_ss", query=query[:60])
+        try:
+            ss_fallback = await asyncio.to_thread(
+                fetch_semantic_scholar_papers.func,
+                query,
+                paper_count,
+                filters.year_from,
+                filters.year_to,
+                sort_by_str,
+            )
+            for p in (ss_fallback or []):
+                if not isinstance(p, dict):
+                    continue
+                if 'error' in p:
+                    continue
+                t = p.get('title', '')
+                if t and t not in seen_titles:
+                    seen_titles.add(t)
+                    all_papers.append(p)
+            if all_papers:
+                logger.info("ss_fallback_success", count=len(all_papers))
+        except Exception as exc:
+            logger.warning("ss_fallback_failed", error=str(exc))
 
     # Sort by citations if requested
     if sort_by_str == 'most_cited':
@@ -151,12 +183,9 @@ async def search_papers(request: QueryRequest):
             reverse=True,
         )
 
-    logger.info(
-        "search_papers_complete",
-        query=query[:60],
-        total=len(all_papers[:paper_count])
-    )
-    return all_papers[:paper_count]
+    final = all_papers[:paper_count]
+    logger.info("search_papers_complete", query=query[:60], total=len(final), source=source)
+    return final
 
 
 @router.post("/query")
@@ -607,8 +636,8 @@ async def chat_with_report(query_id: str, payload: ChatMessage) -> StreamingResp
 
 @router.get("/chat/{query_id}/history")
 async def get_chat_history(query_id: str) -> list:
-    """Get the chat history for a report."""
-    return get_chat_history_list(query_id)
+    """Get the persisted chat history for a report (from DB, survives restarts)."""
+    return await get_chat_messages(query_id)
 
 @router.delete("/chat/{query_id}/history")
 async def delete_chat_history(query_id: str):

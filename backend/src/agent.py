@@ -412,12 +412,17 @@ async def run_research_pipeline(
     # Step 4: Retrieve relevant chunks
     await _send_event(event_queue, "action", "Retrieving most relevant paper excerpts...")
     try:
-        chunks = search_vector_store.invoke({
+        search_params = {
             "query": request.query,
             "n_results": 15,
             "use_mmr": True,
             "rerank": True,
-        })
+        }
+        # Filter to only uploaded chunks when source is 'uploaded'
+        if getattr(filters, 'source', '') == 'uploaded':
+            search_params["source_filter"] = "uploaded"
+
+        chunks = search_vector_store.invoke(search_params)
     except Exception as exc:
         logger.warning("retrieval_error", error=str(exc))
         chunks = []

@@ -119,15 +119,27 @@ export default function ReportViewer({ report, queryId, isStreaming, isComplete,
       </div>
 
       {/* Report Content — white document panel */}
-      <div className="p-8 bg-white rounded-b-xl min-h-[300px]">
-        <div className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-strong:text-slate-900 prose-a:text-indigo-600 prose-code:text-indigo-700 prose-code:bg-indigo-50 prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-pre:bg-slate-900 prose-pre:text-slate-100 prose-blockquote:border-indigo-400 prose-blockquote:text-slate-600">
+      <div 
+        className="p-8 bg-white rounded-b-xl min-h-[300px]"
+        style={{ backgroundColor: '#ffffff', color: '#1e293b' }}
+      >
+        <div 
+          className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-p:text-slate-700 prose-strong:text-slate-900 prose-a:text-indigo-600 prose-code:text-indigo-700 prose-code:bg-indigo-50 prose-code:rounded prose-code:px-1 prose-code:py-0.5 prose-pre:bg-slate-900 prose-pre:text-slate-100 prose-blockquote:border-indigo-400 prose-blockquote:text-slate-600"
+          style={{ color: '#1e293b' }}
+        >
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {report}
           </ReactMarkdown>
 
           {papers && papers.length > 0 && (
-            <div className="mt-8 pt-6 border-t border-slate-200">
-              <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
+            <div 
+              className="mt-8 pt-6 border-t border-slate-200"
+              style={{ color: '#1e293b' }}
+            >
+              <h3 
+                className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3"
+                style={{ color: '#64748b' }}
+              >
                 Sources Analyzed ({papers.length} papers)
               </h3>
               <div className="space-y-2">
@@ -142,10 +154,14 @@ export default function ReportViewer({ report, queryId, isStreaming, isComplete,
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-indigo-600 hover:underline font-medium"
+                        style={{ color: '#4f46e5' }}
                       >
                         {paper.title}
                       </a>
-                      <p className="text-slate-500 text-xs mt-0.5">
+                      <p 
+                        className="text-slate-500 text-xs mt-0.5"
+                        style={{ color: '#64748b' }}
+                      >
                         {Array.isArray(paper.authors)
                           ? paper.authors
                               .slice(0, 3)

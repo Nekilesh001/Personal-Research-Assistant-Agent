@@ -63,6 +63,17 @@ async def init_db() -> None:
                     ON DELETE CASCADE
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_id    TEXT NOT NULL,
+                role        TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                FOREIGN KEY (query_id) REFERENCES queries(query_id)
+                    ON DELETE CASCADE
+            )
+        """)
         await db.commit()
 
     logger.info("db_init_success", path=SQLITE_DB_PATH)
@@ -306,4 +317,64 @@ async def get_query_by_id(query_id: str) -> Optional[Dict[str, Any]]:
         result["papers"] = report.get("papers", [])
 
     return result
+
+
+async def save_chat_message(
+    query_id: str,
+    role: str,
+    content: str,
+) -> None:
+    """
+    Persist a single chat message to the database.
+
+    Args:
+        query_id: The query/report session this message belongs to.
+        role: 'user' or 'assistant'.
+        content: The message text.
+    """
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO chat_messages (query_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (query_id, role, content, now),
+        )
+        await db.commit()
+    logger.info("chat_message_saved", query_id=query_id, role=role)
+
+
+async def get_chat_messages(query_id: str) -> List[Dict[str, Any]]:
+    """
+    Retrieve all chat messages for a given query_id, in chronological order.
+
+    Args:
+        query_id: The query/report session to retrieve messages for.
+
+    Returns:
+        List of {role, content, created_at} dicts, oldest first.
+    """
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT role, content, created_at FROM chat_messages WHERE query_id = ? ORDER BY created_at ASC",
+            (query_id,),
+        )
+        rows = await cursor.fetchall()
+    return [
+        {"role": row["role"], "content": row["content"], "created_at": row["created_at"]}
+        for row in rows
+    ]
+
+
+async def get_chat_message_count(query_id: str) -> int:
+    """
+    Return the number of chat messages stored for a query_id.
+    Used to show chat indicator in history.
+    """
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM chat_messages WHERE query_id = ?",
+            (query_id,),
+        )
+        row = await cursor.fetchone()
+    return row[0] if row else 0
 

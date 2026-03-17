@@ -116,7 +116,7 @@ export default function FilterPanel({ filters, setFilters, mode }) {
               />
               {keywordInput.trim() && (
                 <button
-                  onClick={() => addKeyword({ key: 'Enter', preventDefault: () => {} })}
+                  onClick={() => addKeyword({ key: 'Enter', preventDefault: () => { } })}
                   className="w-5 h-5 flex items-center justify-center bg-accent-primary text-white rounded-md hover:bg-accent-hover transition-colors"
                   title="Add keyword"
                 >
@@ -162,8 +162,8 @@ export default function FilterPanel({ filters, setFilters, mode }) {
           <label className="block text-xs font-medium text-text-secondary mb-1">Sort By</label>
           <select
             id="filter-sort"
-            value={filters?.sort || 'relevance'}
-            onChange={(e) => updateFilter('sort', e.target.value)}
+            value={filters?.sort_by || 'relevance'}
+            onChange={(e) => updateFilter('sort_by', e.target.value)}
             className="w-full px-2 py-1.5 rounded-lg bg-bg-primary border border-border text-text-primary text-xs focus:outline-none focus:border-accent-primary"
           >
             <option value="relevance">Relevance</option>

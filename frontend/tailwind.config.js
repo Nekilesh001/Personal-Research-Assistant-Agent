@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -7,28 +8,33 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Semantic tokens mapped to CSS variables — work in both light/dark modes
         bg: {
-          primary: '#0f1117',
-          surface: '#1a1d2e',
-          hover: '#222538',
+          primary: 'var(--bg-primary)',
+          surface: 'var(--bg-surface)',
+          'surface-2': 'var(--bg-surface-2)',
+          hover: 'var(--bg-hover)',
+          nav: 'var(--bg-nav)',
         },
         border: {
-          DEFAULT: '#2a2d3e',
-          focus: '#6366f1',
+          DEFAULT: 'var(--border-color)',
+          focus: 'var(--border-focus)',
         },
         accent: {
-          primary: '#6366f1',
-          secondary: '#8b5cf6',
-          hover: '#818cf8',
+          primary: 'var(--accent-primary)',
+          secondary: 'var(--accent-secondary)',
+          hover: 'var(--accent-hover)',
+          subtle: 'var(--accent-subtle)',
         },
         text: {
-          primary: '#e2e8f0',
-          secondary: '#94a3b8',
-          muted: '#64748b',
+          primary: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+          tertiary: 'var(--text-tertiary)',
+          muted: 'var(--text-muted)',
         },
-        success: '#10b981',
-        warning: '#f59e0b',
-        error: '#ef4444',
+        success: 'var(--state-success)',
+        warning: 'var(--state-warning)',
+        error: 'var(--state-error)',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
@@ -36,14 +42,14 @@ export default {
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'fade-in': 'fadeIn 0.3s ease-in-out',
+        'fade-in': 'fadeIn 0.35s ease-in-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'slide-in-right': 'slideInRight 0.3s ease-out',
       },
       keyframes: {
         fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         slideUp: {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
