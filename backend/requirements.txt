@@ -16,8 +16,11 @@ langchain-community>=0.3.14,<0.4.0
 langgraph>=0.2.60,<0.3.0
 
 # --- LLM Providers ---
-langchain-google-genai>=2.0.8,<3.0.0
+# Groq (PRIMARY — free, fast)
+langchain-groq>=0.2.0,<0.4.0
+# OpenAI (FALLBACK)
 langchain-openai>=0.3.0,<0.4.0
+# Ollama (LOCAL FALLBACK)
 langchain-ollama>=0.2.3,<0.3.0
 
 # --- Embeddings & Retrieval ---
@@ -46,3 +49,9 @@ structlog>=24.4.0,<25.0.0
 
 # --- Wikipedia ---
 wikipedia>=1.4.0,<2.0.0
+
+# --- PDF Generation and Uploads ---
+fpdf2>=2.7.9,<3.0.0
+PyMuPDF>=1.24.0,<2.0.0
+python-multipart>=0.0.9,<1.0.0
+

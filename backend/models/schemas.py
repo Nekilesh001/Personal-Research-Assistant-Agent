@@ -87,6 +87,10 @@ class QueryRequest(BaseModel):
         pattern="^(expert|beginner)$",
         description="Report style: 'expert' (technical) or 'beginner' (simplified)"
     )
+    selected_papers: List[dict] = Field(
+        default=[],
+        description="Pre-selected papers from the search step — skips fetching when provided"
+    )
 
 
 class PaperMetadata(BaseModel):

@@ -265,3 +265,45 @@ async def delete_query(query_id: str) -> bool:
         logger.warning("query_not_found", query_id=query_id)
 
     return deleted
+
+
+async def get_query_by_id(query_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve a query record (with its report if available) by query_id.
+
+    Args:
+        query_id: The UUID of the query to look up.
+
+    Returns:
+        Dict with query + report data if found, None otherwise.
+    """
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # First get the query itself
+        cursor = await db.execute(
+            "SELECT * FROM queries WHERE query_id = ?",
+            (query_id,),
+        )
+        query_row = await cursor.fetchone()
+
+    if query_row is None:
+        return None
+
+    result = {
+        "query_id": query_row["query_id"],
+        "query": query_row["query"],
+        "mode": query_row["mode"],
+        "paper_count": query_row["paper_count"],
+        "created_at": query_row["created_at"],
+    }
+
+    # Also fetch the report if it exists
+    report = await get_report_by_id(query_id)
+    if report:
+        result["report"] = report.get("report")
+        result["contradictions"] = report.get("contradictions", [])
+        result["followups"] = report.get("followups", [])
+        result["papers"] = report.get("papers", [])
+
+    return result
+

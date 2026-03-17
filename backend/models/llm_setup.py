@@ -1,13 +1,17 @@
 """
-LLM provider setup with automatic fallback chain.
+LLM provider setup — Groq is the PRIMARY provider.
+Priority chain: groq → openai → ollama (Gemini removed entirely).
 
-Priority order: Gemini → OpenAI → Ollama.
-If the configured provider's API key is missing or fails,
-the system automatically falls back to the next available provider.
+Includes:
+  - get_llm() with Groq-first fallback chain
+  - invoke_with_retry() for resilient LLM calls with exponential backoff
+  - test_llm_connection() for the /api/test-llm endpoint
 """
 
 import os
-from typing import Optional, Tuple
+import asyncio
+import time
+from typing import Optional, Any
 
 from dotenv import load_dotenv
 
@@ -17,6 +21,9 @@ load_dotenv()
 
 logger = get_logger(__name__)
 
+# Provider priority order — Gemini is removed
+PROVIDER_CHAIN = ["groq", "openai", "ollama"]
+
 
 def get_llm(
     temperature: float = 0.3,
@@ -25,11 +32,11 @@ def get_llm(
     """
     Initialize and return an LLM instance based on environment configuration.
 
-    Tries providers in order: gemini → openai → ollama.
-    Falls back automatically if a provider's key is missing.
+    Tries providers in order: groq → openai → ollama.
+    Falls back automatically if a provider's key is missing or fails.
 
     Args:
-        temperature: LLM sampling temperature (0.0 = deterministic, 1.0 = creative).
+        temperature: LLM sampling temperature.
         streaming: Whether to enable streaming token output.
 
     Returns:
@@ -38,35 +45,200 @@ def get_llm(
     Raises:
         RuntimeError: If no LLM provider could be initialized.
     """
-    provider = os.getenv("LLM_PROVIDER", "gemini").lower().strip()
-    logger.info("llm_init_start", provider=provider)
+    preferred = os.getenv("LLM_PROVIDER", "groq").lower().strip()
+    logger.info("llm_init_start", provider=preferred)
 
-    # Define the fallback chain based on the preferred provider
-    provider_chain = _build_fallback_chain(provider)
+    # Build chain: preferred first, then remaining providers
+    chain = [preferred] + [p for p in PROVIDER_CHAIN if p != preferred]
 
     last_error: Optional[Exception] = None
-    for candidate in provider_chain:
+    for p in chain:
         try:
-            llm = _init_provider(candidate, temperature, streaming)
+            llm = _build_llm(p, temperature, streaming)
             if llm is not None:
-                logger.info("llm_init_success", provider=candidate)
+                if p != preferred:
+                    logger.warning(
+                        "llm_provider_fallback",
+                        primary=preferred,
+                        using=p,
+                    )
+                else:
+                    logger.info("llm_init_success", provider=p)
                 return llm
         except Exception as exc:
             logger.warning(
                 "llm_init_failed",
-                provider=candidate,
+                provider=p,
                 error=str(exc),
+                error_type=type(exc).__name__,
             )
             last_error = exc
 
-    error_msg = (
-        "No LLM provider could be initialized. "
-        "Please set at least one of: GOOGLE_API_KEY, OPENAI_API_KEY, "
-        "or ensure Ollama is running at OLLAMA_BASE_URL. "
+    raise RuntimeError(
+        f"All LLM providers failed. "
+        f"Please set GROQ_API_KEY (free at https://console.groq.com). "
         f"Last error: {last_error}"
     )
-    logger.error("llm_init_all_failed", error=error_msg)
-    raise RuntimeError(error_msg)
+
+
+def _build_llm(provider: str, temperature: float, streaming: bool) -> Optional[object]:
+    """
+    Attempt to instantiate the specified LLM provider.
+
+    Returns the LLM instance, or None if key is missing.
+    """
+    if provider == "groq":
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key or api_key == "your_groq_api_key_here":
+            logger.info("groq_no_key", reason="GROQ_API_KEY not set or placeholder")
+            return None
+
+        try:
+            from langchain_groq import ChatGroq
+        except ImportError:
+            logger.warning("langchain_groq_missing", reason="pip install langchain-groq")
+            return None
+
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        return ChatGroq(
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=4096,
+            streaming=streaming,
+        )
+
+    elif provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key == "your_openai_api_key_here":
+            logger.info("openai_no_key", reason="OPENAI_API_KEY not set or placeholder")
+            return None
+
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            api_key=api_key,
+            temperature=temperature,
+            streaming=streaming,
+        )
+
+    elif provider == "ollama":
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        from langchain_ollama import ChatOllama
+
+        return ChatOllama(
+            model=os.getenv("OLLAMA_MODEL", "llama3"),
+            base_url=base_url,
+            temperature=temperature,
+        )
+
+    else:
+        logger.warning("unknown_provider_skip", provider=provider)
+        return None
+
+
+async def invoke_with_retry(
+    llm: object,
+    prompt: str,
+    max_retries: int = 3,
+    base_delay: float = 2.0,
+) -> str:
+    """
+    Invoke the LLM with retry logic and exponential backoff.
+
+    Args:
+        llm: A LangChain LLM instance.
+        prompt: The text prompt to send.
+        max_retries: Number of retry attempts.
+        base_delay: Initial delay in seconds (doubles each retry).
+
+    Returns:
+        The LLM's text response.
+
+    Raises:
+        RuntimeError: If all retries are exhausted.
+    """
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info("llm_invoke_attempt", attempt=attempt, prompt_length=len(prompt))
+            response = await llm.ainvoke(prompt)
+            content = getattr(response, "content", str(response))
+            return content
+
+        except Exception as exc:
+            last_error = exc
+            error_type = type(exc).__name__
+            error_msg = str(exc)
+
+            logger.warning(
+                "llm_invoke_failed",
+                attempt=attempt,
+                max_retries=max_retries,
+                error_type=error_type,
+                error=error_msg[:200],
+            )
+
+            print(f"\n[LLM ERROR] Attempt {attempt}/{max_retries}: {error_type}: {error_msg}\n")
+
+            if attempt < max_retries:
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.info("llm_retry_waiting", delay_seconds=delay)
+                await asyncio.sleep(delay)
+
+    raise RuntimeError(
+        f"LLM call failed after {max_retries} attempts. "
+        f"Last error ({type(last_error).__name__}): {str(last_error)}"
+    )
+
+
+async def test_llm_connection() -> dict:
+    """
+    Test the LLM connection by sending a minimal prompt.
+    Tests Groq, then OpenAI, then Ollama — no Gemini.
+
+    Returns:
+        Dict with status, provider, model, and any error info.
+    """
+    try:
+        llm = get_llm(temperature=0.0, streaming=False)
+
+        # Determine which provider was initialised
+        preferred = os.getenv("LLM_PROVIDER", "groq").lower().strip()
+
+        start_time = time.time()
+        response = await llm.ainvoke("Reply with exactly: CONNECTION_OK")
+        content = getattr(response, "content", str(response))
+        elapsed = round(time.time() - start_time, 2)
+
+        return {
+            "status": "ok",
+            "provider": preferred,
+            "model": _get_model_name(preferred),
+            "response": content[:100],
+            "latency_seconds": elapsed,
+        }
+
+    except Exception as exc:
+        provider = os.getenv("LLM_PROVIDER", "groq")
+        return {
+            "status": "error",
+            "provider": provider,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        }
+
+
+def _get_model_name(provider: str) -> str:
+    """Get the model name for the given provider from env vars."""
+    models = {
+        "groq": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "openai": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "ollama": os.getenv("OLLAMA_MODEL", "llama3"),
+    }
+    return models.get(provider, "unknown")
 
 
 def get_embeddings() -> object:
@@ -90,86 +262,3 @@ def get_embeddings() -> object:
     )
     logger.info("embeddings_init_success", model=model_name)
     return embeddings
-
-
-def _build_fallback_chain(preferred: str) -> list:
-    """
-    Build the provider fallback chain starting with the preferred provider.
-
-    Args:
-        preferred: The preferred LLM provider name.
-
-    Returns:
-        Ordered list of provider names to try.
-    """
-    all_providers = ["gemini", "openai", "ollama"]
-
-    if preferred in all_providers:
-        all_providers.remove(preferred)
-        return [preferred] + all_providers
-
-    logger.warning("unknown_provider", provider=preferred, fallback="gemini")
-    return all_providers
-
-
-def _init_provider(
-    provider: str,
-    temperature: float,
-    streaming: bool,
-) -> Optional[object]:
-    """
-    Attempt to initialize a specific LLM provider.
-
-    Args:
-        provider: Provider name ('gemini', 'openai', or 'ollama').
-        temperature: Sampling temperature.
-        streaming: Whether to enable streaming.
-
-    Returns:
-        An LLM instance, or None if the provider's key is missing.
-    """
-    if provider == "gemini":
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key or api_key == "your_google_api_key_here":
-            logger.info("gemini_no_key", reason="GOOGLE_API_KEY not set")
-            return None
-
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        return ChatGoogleGenerativeAI(
-            model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
-            google_api_key=api_key,
-            temperature=temperature,
-            streaming=streaming,
-            convert_system_message_to_human=True,
-        )
-
-    elif provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or api_key == "your_openai_api_key_here":
-            logger.info("openai_no_key", reason="OPENAI_API_KEY not set")
-            return None
-
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            api_key=api_key,
-            temperature=temperature,
-            streaming=streaming,
-        )
-
-    elif provider == "ollama":
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-
-        from langchain_ollama import ChatOllama
-
-        return ChatOllama(
-            model=os.getenv("OLLAMA_MODEL", "llama3"),
-            base_url=base_url,
-            temperature=temperature,
-        )
-
-    else:
-        logger.warning("unknown_provider_skip", provider=provider)
-        return None

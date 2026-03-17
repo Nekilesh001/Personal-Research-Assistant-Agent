@@ -331,22 +331,32 @@ def wikipedia_search(query: str) -> str:
         return f"Wikipedia search failed: {str(exc)}"
 
 
-def expand_query(query: str, llm: object) -> List[str]:
+async def expand_query(query: str, llm: object, filters: Optional[Any] = None) -> List[str]:
     """
     Use the LLM to expand a vague query into 2-3 specific search terms.
+    Incorporates domain and keywords if provided.
 
     Args:
-        query: The original user query (potentially vague).
+        query: The original user query.
         llm: A LangChain LLM instance.
+        filters: Optional FilterConfig for better context.
 
     Returns:
         List of 2-3 expanded search terms.
     """
-    logger.info("query_expansion_start", original_query=query[:80])
+    context_str = ""
+    if filters:
+        if getattr(filters, 'domain', None):
+            context_str += f"\n- Context Domain: {filters.domain}"
+        if getattr(filters, 'keywords', None) and len(filters.keywords) > 0:
+            context_str += f"\n- Must include topics: {', '.join(filters.keywords)}"
+
+    logger.info("query_expansion_start", original_query=query[:80], context=context_str.strip())
 
     expansion_prompt = f"""You are a research query expansion expert. 
-Given the following research query, generate exactly 3 specific, focused search terms 
+Given the following research query and additional context, generate exactly 3 specific, focused search terms 
 that would help find the most relevant academic papers. 
+{context_str}
 
 Original query: "{query}"
 
@@ -354,12 +364,13 @@ Rules:
 - Each search term should be specific and academic
 - Cover different aspects or angles of the topic
 - Use technical terminology that would appear in paper titles/abstracts
+- If a 'Context Domain' or 'Keywords' are provided, ensure they are integrated into the search terms.
 - Return ONLY the search terms, one per line, no numbering, no extra text
 
 Search terms:"""
 
     try:
-        response = llm.invoke(expansion_prompt)
+        response = await llm.ainvoke(expansion_prompt)
         content = response.content if hasattr(response, "content") else str(response)
 
         # Parse the response into individual search terms

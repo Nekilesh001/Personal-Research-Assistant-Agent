@@ -6,7 +6,7 @@ import { useState } from 'react';
  * Displays a scrollable list of previous research queries with
  * timestamps. Clicking loads the saved report; delete button removes it.
  */
-export default function QueryHistory({ history, onSelect, onDelete }) {
+export default function QueryHistory({ history, currentQueryId, onSelectQuery, onDeleteQuery }) {
   const [hoveredId, setHoveredId] = useState(null);
 
   /**
@@ -14,94 +14,81 @@ export default function QueryHistory({ history, onSelect, onDelete }) {
    */
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
-    try {
-      const date = new Date(dateStr);
-      const now = new Date();
-      const diffMs = now - date;
-      const diffMins = Math.floor(diffMs / 60000);
-      const diffHours = Math.floor(diffMs / 3600000);
-      const diffDays = Math.floor(diffMs / 86400000);
-
-      if (diffMins < 1) return 'Just now';
-      if (diffMins < 60) return `${diffMins}m ago`;
-      if (diffHours < 24) return `${diffHours}h ago`;
-      if (diffDays < 7) return `${diffDays}d ago`;
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    } catch {
-      return '';
+    
+    const d = new Date(dateStr);
+    const today = new Date();
+    
+    // If today, show time. Otherwise, show short date.
+    if (d.toDateString() === today.toDateString()) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
   return (
-    <div className="flex-1 overflow-y-auto" id="query-history-panel">
-      {history.length === 0 ? (
-        <div className="p-4 text-center text-text-muted text-sm">
-          <svg className="w-8 h-8 mx-auto mb-2 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <div className="glass rounded-xl border border-border overflow-hidden flex flex-col max-h-[400px]">
+      <div className="px-4 py-3 border-b border-border bg-bg-surface/50 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+          <svg className="w-4 h-4 text-accent-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          No queries yet.
-          <br />
-          <span className="text-xs">Your research history will appear here.</span>
-        </div>
-      ) : (
-        <div className="p-2 space-y-1">
-          {history.map((item) => (
+          Previous Research
+        </h3>
+        <span className="text-[10px] font-medium text-text-tertiary uppercase tracking-wider bg-bg-surface px-2 py-0.5 rounded-full border border-border">
+          {history.length} Saved
+        </span>
+      </div>
+
+      <div className="overflow-y-auto p-2 space-y-1">
+        {history.map((item) => {
+          const isActive = currentQueryId === item.query_id;
+          
+          return (
             <div
               key={item.query_id}
-              className="group relative p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-bg-hover border border-transparent hover:border-border"
+              className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all ${
+                isActive 
+                  ? "bg-accent-primary/10 border border-accent-primary/20 shadow-sm" 
+                  : "hover:bg-bg-surface border border-transparent"
+              }`}
+              onClick={() => onSelectQuery(item.query_id)}
               onMouseEnter={() => setHoveredId(item.query_id)}
               onMouseLeave={() => setHoveredId(null)}
-              onClick={() => onSelect(item)}
-              id={`history-item-${item.query_id}`}
             >
-              {/* Query text */}
-              <p className="text-sm text-text-primary font-medium truncate pr-6">
-                {item.query}
-              </p>
-
-              {/* Meta info */}
-              <div className="flex items-center gap-2 mt-1.5">
-                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                  item.mode === 'expert'
-                    ? 'bg-accent-primary/15 text-accent-primary'
-                    : 'bg-success/15 text-success'
-                }`}>
-                  {item.mode}
-                </span>
-                {item.paper_count > 0 && (
-                  <span className="text-xs text-text-muted">
-                    {item.paper_count} papers
+              <div className="flex-1 min-w-0 pr-2">
+                <p className={`text-sm truncate font-medium ${isActive ? "text-accent-primary" : "text-text-primary group-hover:text-accent-primary transition-colors"}`}>
+                  {item.query}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] text-text-tertiary">
+                    {formatDate(item.created_at)}
                   </span>
-                )}
-                <span className="text-xs text-text-muted ml-auto">
-                  {formatDate(item.created_at)}
-                </span>
-              </div>
-
-              {/* Report indicator */}
-              {item.has_report && (
-                <div className="absolute top-3 right-3">
-                  <div className="w-2 h-2 rounded-full bg-success" title="Report available" />
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    item.mode === "expert" 
+                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" 
+                      : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                  }`}>
+                    {item.mode}
+                  </span>
                 </div>
-              )}
-
+              </div>
+              
               {/* Delete button (shown on hover) */}
               {hoveredId === item.query_id && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); onDelete(item.query_id); }}
-                  className="absolute top-2 right-2 p-1 rounded-md text-text-muted hover:text-error hover:bg-error/10 transition-colors"
-                  title="Delete"
-                  id={`delete-history-${item.query_id}`}
+                  onClick={(e) => { e.stopPropagation(); onDeleteQuery(item.query_id); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-text-muted hover:text-error hover:bg-error/10 transition-colors bg-bg-surface shadow-sm"
+                  title="Delete query"
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                 </button>
               )}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }
